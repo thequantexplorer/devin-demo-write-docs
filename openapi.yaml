@@ -1,0 +1,557 @@
+openapi: 3.1.0
+info:
+  title: notes-api
+  version: 1.4.0
+  summary: A small REST API for notes.
+  description: |
+    List, search, read, create, update and delete notes.
+
+    Notes are stored in memory. The server loads the notes in `data/seed.json`
+    (ids 1, 2 and 3) every time it starts, and changes are lost when it stops.
+
+    Read requests are public. Write requests (`POST`, `PATCH`, `DELETE`) need a
+    bearer token equal to the `NOTES_API_TOKEN` environment variable
+    (`dev-token` when it is unset or empty).
+
+    Every error response uses the `Error` schema. A method or path the API does
+    not serve returns `404` with code `not_found` and the message
+    `No route for <METHOD> <path>`; there is no `405` response.
+servers:
+  - url: http://localhost:3000
+    description: Local server started with `npm start` (port set by `PORT`, default 3000).
+tags:
+  - name: health
+    description: Server status.
+  - name: notes
+    description: Create, read, update and delete notes.
+
+paths:
+  /health:
+    get:
+      operationId: getHealth
+      tags: [health]
+      summary: Health check
+      description: Returns `200` when the server is running.
+      security: []
+      responses:
+        '200':
+          description: The server is running.
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [status]
+                properties:
+                  status:
+                    type: string
+                    const: ok
+              example:
+                status: ok
+        '500':
+          $ref: '#/components/responses/InternalError'
+
+  /notes:
+    get:
+      operationId: listNotes
+      tags: [notes]
+      summary: List and search notes
+      description: |
+        Returns a page of notes that match all the given filters. Pinned notes
+        come first, then the most recently updated (`updatedAt`), then the
+        highest `id`.
+
+        `limit`, `offset` and `pinned` are validated in that order, and only the
+        first invalid parameter is reported.
+      security: []
+      parameters:
+        - name: limit
+          in: query
+          description: Maximum number of notes to return. Must be digits only (no sign or decimal point).
+          schema:
+            type: integer
+            minimum: 1
+            maximum: 100
+            default: 20
+        - name: offset
+          in: query
+          description: Number of matching notes to skip. Must be digits only (no sign or decimal point).
+          schema:
+            type: integer
+            minimum: 0
+            maximum: 1000000
+            default: 0
+        - name: tag
+          in: query
+          description: Only notes that have exactly this tag. An empty value means no filter.
+          schema:
+            type: string
+        - name: q
+          in: query
+          description: |
+            Only notes whose title or body contains this text, compared
+            case-insensitively. An empty value means no filter.
+          schema:
+            type: string
+        - name: pinned
+          in: query
+          description: Only pinned (`true`) or unpinned (`false`) notes. Any other value is rejected.
+          schema:
+            type: string
+            enum: ['true', 'false']
+      responses:
+        '200':
+          description: A page of notes.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/NoteList'
+              example:
+                data:
+                  - id: 1
+                    title: Welcome to notes-api
+                    body: This note is loaded from data/seed.json every time the server starts.
+                    tags: [intro]
+                    pinned: true
+                    createdAt: '2026-01-05T09:00:00.000Z'
+                    updatedAt: '2026-01-05T09:00:00.000Z'
+                  - id: 3
+                    title: Sprint retro
+                    body: Ship smaller PRs. Write the docs with the code.
+                    tags: [work]
+                    pinned: false
+                    createdAt: '2026-01-08T15:00:00.000Z'
+                    updatedAt: '2026-01-08T15:00:00.000Z'
+                total: 3
+                limit: 2
+                offset: 0
+        '400':
+          description: '`limit`, `offset` or `pinned` is not valid (`validation_error`).'
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+              examples:
+                limit:
+                  summary: limit out of range
+                  value:
+                    error:
+                      code: validation_error
+                      message: Request is not valid
+                      details:
+                        - field: limit
+                          message: must be a whole number from 1 to 100
+                offset:
+                  summary: offset not a whole number
+                  value:
+                    error:
+                      code: validation_error
+                      message: Request is not valid
+                      details:
+                        - field: offset
+                          message: must be a whole number from 0 to 1000000
+                pinned:
+                  summary: pinned not true or false
+                  value:
+                    error:
+                      code: validation_error
+                      message: Request is not valid
+                      details:
+                        - field: pinned
+                          message: must be true or false
+        '500':
+          $ref: '#/components/responses/InternalError'
+
+    post:
+      operationId: createNote
+      tags: [notes]
+      summary: Create a note
+      description: |
+        Creates a note. `title` is required; `body`, `tags` and `pinned` default
+        to `""`, `[]` and `false`. `createdAt` and `updatedAt` are set to the
+        current time. The new note gets the next unused id.
+
+        The body is only parsed when `Content-Type` is `application/json`.
+        Without it, the body is treated as `{}` and the request fails with
+        `title is required`.
+      security:
+        - bearerAuth: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/NoteCreate'
+            example:
+              title: '  Call the dentist '
+              tags: [personal, personal]
+      responses:
+        '201':
+          description: The note was created.
+          headers:
+            Location:
+              description: Path of the new note, for example `/notes/4`.
+              schema:
+                type: string
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Note'
+              example:
+                id: 4
+                title: Call the dentist
+                body: ''
+                tags: [personal]
+                pinned: false
+                createdAt: '2026-11-02T03:21:41.854Z'
+                updatedAt: '2026-11-02T03:21:41.854Z'
+        '400':
+          $ref: '#/components/responses/BadRequestBody'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '413':
+          $ref: '#/components/responses/PayloadTooLarge'
+        '500':
+          $ref: '#/components/responses/InternalError'
+
+  /notes/{id}:
+    parameters:
+      - name: id
+        in: path
+        required: true
+        description: |
+          The note id. A value that is not a positive integer (for example `0`
+          or `abc`) returns `404 not_found`, not `400`.
+        schema:
+          type: integer
+          minimum: 1
+    get:
+      operationId: getNote
+      tags: [notes]
+      summary: Get one note
+      security: []
+      responses:
+        '200':
+          description: The note.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Note'
+              example:
+                id: 2
+                title: Groceries
+                body: Eggs, oat milk, coffee beans.
+                tags: [personal, shopping]
+                pinned: false
+                createdAt: '2026-01-06T17:30:00.000Z'
+                updatedAt: '2026-01-07T08:15:00.000Z'
+        '404':
+          $ref: '#/components/responses/NotFound'
+        '500':
+          $ref: '#/components/responses/InternalError'
+
+    patch:
+      operationId: updateNote
+      tags: [notes]
+      summary: Update some fields of a note
+      description: |
+        Changes only the fields in the body and sets `updatedAt` to the current
+        time. The body must contain at least one field.
+
+        Checks run in this order: bearer token (`401`), note exists (`404`),
+        body is valid (`400`).
+      security:
+        - bearerAuth: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/NoteUpdate'
+            example:
+              pinned: true
+      responses:
+        '200':
+          description: The updated note.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Note'
+              example:
+                id: 4
+                title: Call the dentist
+                body: ''
+                tags: [personal]
+                pinned: true
+                createdAt: '2026-11-02T03:21:41.854Z'
+                updatedAt: '2026-11-02T03:21:41.860Z'
+        '400':
+          $ref: '#/components/responses/BadRequestBody'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '404':
+          $ref: '#/components/responses/NotFound'
+        '413':
+          $ref: '#/components/responses/PayloadTooLarge'
+        '500':
+          $ref: '#/components/responses/InternalError'
+
+    delete:
+      operationId: deleteNote
+      tags: [notes]
+      summary: Delete a note
+      description: Checks the bearer token (`401`) before checking that the note exists (`404`).
+      security:
+        - bearerAuth: []
+      responses:
+        '204':
+          description: The note was deleted. The response has no body.
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '404':
+          $ref: '#/components/responses/NotFound'
+        '500':
+          $ref: '#/components/responses/InternalError'
+
+components:
+  securitySchemes:
+    bearerAuth:
+      type: http
+      scheme: bearer
+      description: |
+        Send `Authorization: Bearer <token>`, where the token equals the
+        `NOTES_API_TOKEN` environment variable (`dev-token` by default). The
+        scheme is case-sensitive and must be exactly `Bearer` followed by one
+        space.
+
+  schemas:
+    Note:
+      type: object
+      required: [id, title, body, tags, pinned, createdAt, updatedAt]
+      properties:
+        id:
+          type: integer
+          minimum: 1
+        title:
+          type: string
+          minLength: 1
+          maxLength: 120
+        body:
+          type: string
+          maxLength: 10000
+        tags:
+          type: array
+          maxItems: 5
+          uniqueItems: true
+          items:
+            $ref: '#/components/schemas/Tag'
+        pinned:
+          type: boolean
+        createdAt:
+          type: string
+          format: date-time
+        updatedAt:
+          type: string
+          format: date-time
+
+    NoteList:
+      type: object
+      required: [data, total, limit, offset]
+      properties:
+        data:
+          type: array
+          items:
+            $ref: '#/components/schemas/Note'
+        total:
+          type: integer
+          minimum: 0
+          description: Number of notes that match the filters, before `limit` and `offset`.
+        limit:
+          type: integer
+        offset:
+          type: integer
+
+    Tag:
+      type: string
+      pattern: '^[a-z0-9-]{1,20}$'
+      description: 1-20 characters of `a-z`, `0-9` or `-`.
+
+    Title:
+      type: string
+      maxLength: 120
+      description: |
+        Leading and trailing whitespace is trimmed before the check and before
+        saving. After trimming it must be 1-120 characters.
+
+    Body:
+      type: string
+      maxLength: 10000
+
+    Tags:
+      type: array
+      maxItems: 5
+      items:
+        $ref: '#/components/schemas/Tag'
+      description: |
+        At most 5 items (counted before duplicates are removed). Duplicates are
+        removed and the first occurrence order is kept.
+
+    NoteCreate:
+      type: object
+      required: [title]
+      additionalProperties: false
+      properties:
+        title:
+          $ref: '#/components/schemas/Title'
+        body:
+          $ref: '#/components/schemas/Body'
+        tags:
+          $ref: '#/components/schemas/Tags'
+        pinned:
+          type: boolean
+
+    NoteUpdate:
+      type: object
+      minProperties: 1
+      additionalProperties: false
+      properties:
+        title:
+          $ref: '#/components/schemas/Title'
+        body:
+          $ref: '#/components/schemas/Body'
+        tags:
+          $ref: '#/components/schemas/Tags'
+        pinned:
+          type: boolean
+
+    Error:
+      type: object
+      required: [error]
+      properties:
+        error:
+          type: object
+          required: [code, message]
+          properties:
+            code:
+              type: string
+              enum:
+                - validation_error
+                - invalid_json
+                - unauthorized
+                - not_found
+                - payload_too_large
+                - internal_error
+            message:
+              type: string
+            details:
+              type: array
+              description: Only present when `code` is `validation_error`.
+              items:
+                type: object
+                required: [field, message]
+                properties:
+                  field:
+                    type: string
+                    description: A field or query parameter name, or `(body)` for the body as a whole.
+                  message:
+                    type: string
+
+  responses:
+    BadRequestBody:
+      description: |
+        The body is not valid JSON (`invalid_json`) or does not pass validation
+        (`validation_error`). Validation reports every problem at once. Possible
+        `details` items:
+
+        | field | message |
+        | ----- | ------- |
+        | `(body)` | `must be a JSON object` (the body is a JSON array) |
+        | `(body)` | `must contain at least one field` (PATCH with `{}`) |
+        | any unknown field | `is not a known field` |
+        | `title` | `is required` (missing, not a string, or empty after trimming) |
+        | `title` | `must be 120 characters or fewer` |
+        | `body` | `must be a string` |
+        | `body` | `must be 10000 characters or fewer` |
+        | `tags` | `must be an array of strings` (not an array) |
+        | `tags` | `can have at most 5 tags` |
+        | `tags` | `each tag must be 1-20 characters: a-z, 0-9 or -` |
+        | `pinned` | `must be true or false` |
+
+        `invalid_json` is also returned when the JSON top-level value is not an
+        object or array (for example `"hi"` or `1`).
+      content:
+        application/json:
+          schema:
+            $ref: '#/components/schemas/Error'
+          examples:
+            validation:
+              summary: Several invalid fields
+              value:
+                error:
+                  code: validation_error
+                  message: Request is not valid
+                  details:
+                    - field: color
+                      message: is not a known field
+                    - field: title
+                      message: is required
+                    - field: tags
+                      message: 'each tag must be 1-20 characters: a-z, 0-9 or -'
+            invalidJson:
+              summary: Body is not valid JSON
+              value:
+                error:
+                  code: invalid_json
+                  message: Request body is not valid JSON
+
+    Unauthorized:
+      description: The bearer token is missing or wrong.
+      content:
+        application/json:
+          schema:
+            $ref: '#/components/schemas/Error'
+          examples:
+            missing:
+              summary: No `Authorization` header, or not `Bearer <token>`
+              value:
+                error:
+                  code: unauthorized
+                  message: Missing bearer token
+            invalid:
+              summary: Token does not match `NOTES_API_TOKEN`
+              value:
+                error:
+                  code: unauthorized
+                  message: Invalid bearer token
+
+    NotFound:
+      description: There is no note with this id.
+      content:
+        application/json:
+          schema:
+            $ref: '#/components/schemas/Error'
+          example:
+            error:
+              code: not_found
+              message: Note 99 not found
+
+    PayloadTooLarge:
+      description: The request body is larger than 100kb.
+      content:
+        application/json:
+          schema:
+            $ref: '#/components/schemas/Error'
+          example:
+            error:
+              code: payload_too_large
+              message: Request body is larger than 100kb
+
+    InternalError:
+      description: An unexpected error. The message is always the same.
+      content:
+        application/json:
+          schema:
+            $ref: '#/components/schemas/Error'
+          example:
+            error:
+              code: internal_error
+              message: Something went wrong
