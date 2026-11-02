@@ -1,0 +1,26 @@
+[
+  {
+    "title": "Welcome to notes-api",
+    "body": "This note is loaded from data/seed.json every time the server starts.",
+    "tags": ["intro"],
+    "pinned": true,
+    "createdAt": "2026-01-05T09:00:00.000Z",
+    "updatedAt": "2026-01-05T09:00:00.000Z"
+  },
+  {
+    "title": "Groceries",
+    "body": "Eggs, oat milk, coffee beans.",
+    "tags": ["personal", "shopping"],
+    "pinned": false,
+    "createdAt": "2026-01-06T17:30:00.000Z",
+    "updatedAt": "2026-01-07T08:15:00.000Z"
+  },
+  {
+    "title": "Sprint retro",
+    "body": "Ship smaller PRs. Write the docs with the code.",
+    "tags": ["work"],
+    "pinned": false,
+    "createdAt": "2026-01-08T15:00:00.000Z",
+    "updatedAt": "2026-01-08T15:00:00.000Z"
+  }
+]

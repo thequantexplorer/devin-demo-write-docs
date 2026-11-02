@@ -1,0 +1,21 @@
+{
+  "name": "notes-api",
+  "version": "1.4.0",
+  "private": true,
+  "description": "A small REST API for notes",
+  "main": "src/server.js",
+  "engines": {
+    "node": ">=20"
+  },
+  "scripts": {
+    "start": "node src/server.js",
+    "test": "node --test",
+    "docs:check": "node scripts/check-docs.js"
+  },
+  "dependencies": {
+    "express": "^4.21.2"
+  },
+  "devDependencies": {
+    "yaml": "^2.6.1"
+  }
+}
